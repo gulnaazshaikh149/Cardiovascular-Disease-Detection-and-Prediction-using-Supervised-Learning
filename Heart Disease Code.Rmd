@@ -1,0 +1,358 @@
+## Libraries
+```{r}
+library(dplyr)
+library(gtools)
+library(gmodels)
+library(ggplot2)
+library(class)
+library(tidyr)
+library(lattice)
+library(caret)
+library(rmdformats)
+```
+## Logistic Regression
+### Data Import
+We will use dataset that record an information about patients with heart disease.
+```{r}
+heart <- read.csv("heart.csv")
+```
+
+```{r}
+glimpse(heart)
+```
+Based on the data above there are several information that maybe useful for our analysis:
+ï..age : age of respondent sex : 1 = male; 0 = female cp : the severe type of pains trestbps : blood pressure (mm Hg) chol : cholesterol (mg / dl) fbs : blood sugar, 1 = above 120 mg / dl; 0 = below 120 mg / dl restecg : electrocardiograph result thalach : maximum hertbeat recorded exang : exercised include angina, 1 = yes; 0 = no oldspeak : ST Depression, based on exercise to rest slope : Slop of ST Segment ca : Number of the major blood vessels thal : 3 = Normal, 6 = permanently disable, 7 = reversable disable target : 1 = sick; 0 = not sick
+
+```{r}
+head(heart, 3)
+```
+## Data Wrangling
+```{r}
+heart <- heart %>%
+  #mutate_if(is.integer, as.factor) %>%
+  mutate(cp = as.factor(cp),
+         restecg = as.factor(restecg),
+         slope = as.factor(slope),
+         ca = as.factor(ca),
+         thal = as.factor(thal),
+         sex = factor(sex, levels = c(0,1), labels = c("female", "male")),
+         fbs = factor(fbs, levels = c(0,1), labels = c("False", "True")),
+         exang = factor(exang, levels = c(0,1), labels = c("No", "Yes")),
+         target = factor(target, levels = c(0,1), labels = c("Health", "Not Health")))
+
+glimpse(heart)
+```
+Next, we will check the availability of any missing value in each variables.
+
+## Visualization for Distribution of Target Variable
+```{r}
+ggplot(heart, aes(x = target, fill = target)) +
+  geom_bar() +
+  labs(title = "Distribution of Target Variable", x = "Target", y = "Count") +
+  theme_minimal()
+
+```
+## Boxplot of Cholestrol by Target
+```{r}
+ggplot(heart, aes(x = target, y = chol, fill = target)) +
+  geom_boxplot() +
+  labs(title = "Cholesterol Distribution by Target", x = "Target", y = "Cholesterol") +
+  theme_minimal()
+
+```
+## Scatter Plot of Age vs Maximum Heartbeat (Thalach)
+```{r}
+ggplot(heart, aes(x = age, y = thalach, color = target)) +
+  geom_point() +
+  labs(title = "Scatter Plot of Age vs. Maximum Heartbeat", x = "Age", y = "Maximum Heartbeat") +
+  theme_minimal()
+
+```
+
+```{r}
+colSums(is.na(heart))
+```
+We can see that there are no missing values in each of our variables, so we do not need to drop those variable from our analysis.
+
+## Data Preprocessing
+```{r}
+prop.table(table(heart$target))
+```
+These are the actual number of our variable target class.
+```{r}
+table(heart$target)
+```
+## Cross Validation
+Next step of our analysis will be splitting our data into train and test data. We will use our train data to train our model and use our test data to validate our model when overcoming the unseen data.
+```{r}
+set.seed(100)
+index <- sample(nrow(heart), nrow(heart)*0.7)
+
+# Data train
+train_heart <- heart[index,]
+
+# Data test
+test_heart <- heart[-index,]
+```
+Next, we will check our train data proportion whether the proportion is balance enough to train our model, this need to be done so we can minimize the risk that our models are overfit.
+```{r}
+prop.table(table(train_heart$target))
+```
+# Modelling
+We will create a model based on our train data. we will use several variables that may have a significant effect toward our target variable like sex, cp, fbs, and thal.
+
+Then we will also use the stepwise method to see if we can get a better model than our previous one.
+```{r}
+# Create a model
+model1 <- glm(formula = target ~ sex + cp +  fbs + thal, family = "binomial", data = train_heart)
+
+# Model summary
+summary(model1)
+```
+as we can see, there are only several variables that are significant toward our model. As we have not try other variable that may have been affected our target variable, we will try to use stepwise method to create a better model than our previous one.
+```{r}
+# Create a model without predictor
+model_none <- glm(target ~ 1, family = "binomial", data = train_heart)
+
+# Create a model with all predictor
+model_all <- glm(target ~ ., family = "binomial", data = train_heart)
+```
+
+```{r}
+# Stepwise regression backward
+model_back <- step(object = model_all, direction = "backward", trace = F)
+
+# Stepwise regression forward
+model_forw <- step(object = model_all, scope = list(lower = model_none, upper = model_all), direction = "forward", trace = F)
+
+# Stepwise regression both
+model_both <- step(object = model_all, scope = list(lower = model_none, upper = model_all), direction = "both", trace = F)
+```
+Next we will see our model summary in each of the model that we have been created before.
+
+We will see it based on:
+
+1. AIC, amount of information lost in the model, lower AIC indicate a good quality of a model.
+2. Residual Deviance, Error of the model when the model have a predictor, lower Residual Deviance means we have a better model
+
+```{r}
+# Model Summary
+
+# Backward
+
+summary(model_back)
+```
+```{r}
+# Forward
+
+summary(model_forw)
+```
+```{r}
+# Both
+
+summary(model_both)
+```
+Based on the result, we can see that our model_back and model_both have a similar value of AIC & Residual Deviance. Both of those model have the AIC value 459.54 and the Residual deviance value 419.54. while our model_forw have the AIC value 461.96 and the Residual deviance value 415.96.
+
+Although our model_forw have a better Residual Deviance than other model, the number of variables that significant towards the our target variables are not as much as the other two models. Therefore, we will not choose model_forw and proceed to choose either the model_back or model_both.
+
+In this case we will choose model_both for our further analysis.
+
+## Prediction
+```{r}
+test_heart$prediction <-  predict(model_both, type = "response", newdata = test_heart)
+
+# Create Plot
+
+test_heart %>%
+  ggplot(aes(x=prediction)) +
+  geom_density() +
+  labs(title = "Probabilities Distribution of Prediction Data") +
+  theme_minimal()
+```
+we can see from the plot, the result of our prediction are more inclined to the value of 1 (Not Health).
+
+```{r}
+pred <- predict(model_both, type = "response", newdata = test_heart)
+```
+
+```{r}
+result_pred <- ifelse(pred >= 0.5, "Not Health", "Health")
+
+# Put our result prediction into our test data
+
+test_heart$prediction <- result_pred
+```
+
+Overview
+```{r}
+test_heart %>%
+  select(target, prediction) %>%
+  head(5)
+```
+## Model Evaluation
+In model evaluation, we will see how good our model based on several different matrix.
+
+Accuracy : How much our prediction able to predict our target variable Recall / Sensitivity : How much our prediction able to predict correctly the positive class
+Specificity : How much our prediction able to predict correctly the negative class Precision : How much our prediction of positive class correctly predicted
+
+```{r}
+conf_mat <- confusionMatrix(as.factor(result_pred), reference = test_heart$target, positive = "Not Health")
+
+conf_mat
+```
+```{r}
+recall <- round(46/(46+4),3)
+specificity <- round(30/(30+11),3)
+precision <- round(46/(46+11),3)
+accuracy <- round((46+30)/(46+30+11+4),3)
+
+matrix <- cbind.data.frame(accuracy, recall, specificity, precision)
+
+matrix
+```
+Based on the matrix summary, we can see that the ability of our model to predict our target variable are 83.5%. from entire of our prediction data. Our model ability to correctly predicted the Not Health person is 92%, while it ability to correctly predicted the Health person is 73.2%. Furthermore, from all of Not Health prediction our model able to predict it correctly 80.7%.
+
+## Model Interpretetion
+```{r}
+# Return the probability value
+
+model_both$coefficients %>%
+  inv.logit() %>%
+  data.frame()
+```
+Some conclusions that we can interprete from these dataframe are:
+
+The probability of male to be diagnosed with heart disease is 11.4%.
+
+People with high level severe type of pain (cp = 3) have a 88% probability to be diagnosed with heart disease.
+
+## K-Nearest Neighbor
+### Data Wrangling
+as we use difference approach for K - Nearest Neighbor method, we need to create a new data frame that consist of dummy variable that we are going to use to predict our target variable.
+
+```{r}
+# Create dummy variable
+
+dummy <- dummyVars("~target + sex +cp + trestbps + chol + fbs + restecg + thalach + exang + oldpeak + slope + ca + thal", data = heart)
+
+# Create new data frame
+
+dummy <- data.frame(predict(dummy, newdata = heart))
+
+# Check our data frame structure
+
+str(dummy)
+```
+After we create a new data frame that called dummy, we will remove variables that originally consist of two categories.
+
+Those variables are:
+
+target
+sex
+fbs
+exang
+
+```{r}
+dummy$target.Health <- NULL
+dummy$sex.female <- NULL
+dummy$fbs.False <- NULL
+dummy$exang.No <- NULL
+```
+
+```{r}
+head(dummy, 3)
+```
+## Cross Validation: K - Nearest Method
+K - Nearest Method have a different approach for cross validation. We are going to split both of our Predictor and Target variables into train and test data.
+
+The proportion will be 70% for our train data and 30% for our test data.
+
+```{r}
+set.seed(100)
+
+# Predictor
+
+train_x <- dummy[index, -1]
+test_x <- dummy[-index, -1]
+
+# Target
+
+train_y <- dummy[index, 1]
+test_y <- dummy[-index, 1]
+```
+
+### Choose K
+
+```{r}
+sqrt(nrow(train_x))
+```
+### Scaling
+We will use scale() function to scale both of our predictor train and test data.
+
+```{r}
+train_x <- scale(x = train_x)
+test_x <- scale(x = test_x, center = attr(train_x, "scaled:center"), scale = attr(train_x, "scaled:scale"))
+```
+
+## Create K - Nearest Neighbor Prediction
+
+Next, we will create a prediction using knn() from library class
+
+```{r}
+pred_knn <- knn(train = train_x, test = test_x, cl = train_y, k = 26)
+```
+
+To ease our model summary readibility, we will transform our K - Nearest Neighbor Prediction object into data frame, and rename the levels into their original labels.
+
+0 : Health
+1 : Not Health
+```{r}
+pred_knn <- pred_knn %>%
+  as.data.frame() %>%
+  mutate(pred_knn = factor(pred_knn, levels = c(0,1), labels = c("Health", "Not Health"))) %>%
+  select(pred_knn)
+```
+
+We will do the same way with our target test data which will be use for reference in our confusion matrix
+
+0 : Health
+1 : Not Health
+```{r}
+test_y <- test_y %>%
+  as.data.frame() %>%
+  mutate(target = factor(test_y, levels = c(0,1), labels = c("Health", "Not Health"))) %>%
+  select(target)
+```
+
+## Create Confusion Matrix
+```{r}
+conf_mat_knn <- confusionMatrix(pred_knn$pred_knn, reference = test_y$target, positive = "Not Health")
+
+conf_mat_knn
+```
+```{r}
+recall_knn <- round(48/(48+2),3)
+specificity_knn <- round(29/(29+12),3)
+precision_knn <- round(48/(48+12),3)
+accuracy_knn <- round((48+29)/(48+29+12+2),3)
+
+matrix_knn <- cbind.data.frame(accuracy_knn, recall_knn, specificity_knn, precision_knn)
+
+matrix_knn
+```
+Based on the matrix summary, we can see that the ability of our K - Nearest Neighbor Prediction predict our target variable are 84.6%. from entire of our prediction data. Our K - Nearest Neighbor Prediction ability to correctly predicted the Not Health person is 96%, while it ability to correctly predicted the Health person is 70.7%. Furthermore, from all of Not Health prediction our K - Nearest Neighbor Prediction able to predict it correctly 80%.
+
+## Model Comparison: Logistic Regression vs K - Nearest Neighbor
+We have two method for our analysis, now we need to choose which of these method output that we will use to predict whether a person is diagnosed with heart disease or vice versa.
+```{r}
+# Matrix summary from Logistic Regression
+
+matrix
+```
+```{r}
+# Matrix summary from K - Nearest Neighbor
+
+matrix_knn
+```
+We can see from the table above that we have almost similar value for each matrix with K - Nearest Neighbor have a slightly better value in accuracy and recall, while Logistic Regression model have a better value in specificity and precision.
